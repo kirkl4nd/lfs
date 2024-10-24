@@ -5,6 +5,10 @@ edition = "2021"
 
 [dependencies]
 actix-web = "4.9.0"
+async-trait = "0.1.83"
 chrono = "0.4.38"
-rusqlite = "0.32.1"
-uuid = { version = "1.11.0", features = ["v4"] }
+dotenv = "0.15.0"
+libc = "0.2.161"
+sqlx = { version = "0.8.2", features = ["sqlite"] }
+uuid = { version = "1.11.0", features = ["v4", "serde"] }
+winapi = "0.3.9"
