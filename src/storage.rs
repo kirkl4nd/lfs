@@ -1,12 +1,12 @@
+use std::env;
 use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::env;
 
 #[cfg(unix)]
-use std::ffi::CString;
+use libc::statvfs;
 #[cfg(unix)]
-use libc::{statvfs, c_ulong};
+use std::ffi::CString;
 
 #[cfg(windows)]
 use std::ffi::OsStr;
@@ -18,25 +18,24 @@ use winapi::um::fileapi::GetDiskFreeSpaceExW;
 use winapi::um::winnt::ULARGE_INTEGER;
 
 pub struct Storage {
-    pub path: PathBuf,  // PathBuf is more flexible for owned paths
+    pub path: PathBuf, // PathBuf is more flexible for owned paths
 }
 
 impl Storage {
-
     pub fn new() -> Self {
         // read env variable STORAGE_PATH
         let path = env::var("STORAGE_PATH").expect("STORAGE_PATH must be set");
         // create the directory if it doesn't exist
         fs::create_dir_all(&path).expect("Failed to create storage directory");
-        Storage { path: PathBuf::from(path) }
+        Storage {
+            path: PathBuf::from(path),
+        }
     }
-
 
     pub fn get_used_space(&self) -> Result<u64, Box<dyn Error>> {
         let metadata = fs::metadata(&self.path)?;
         Ok(metadata.len())
     }
-
 
     /// Returns the amount of available space in the path directory
     pub fn get_free_space(&self) -> Result<u64, Box<dyn Error>> {
@@ -45,7 +44,6 @@ impl Storage {
         Ok(free_space)
     }
 }
-
 
 // HELPER FUNCTIONS TO GET FREE SPACE IN TARGET DIR
 
@@ -65,10 +63,7 @@ fn get_free_space_in_path(path: &Path) -> Result<u64, Box<dyn Error>> {
 
 #[cfg(windows)]
 fn get_free_space_in_path(path: &Path) -> Result<u64, Box<dyn Error>> {
-    let path_wide: Vec<u16> = OsStr::new(path)
-        .encode_wide()
-        .chain(Some(0))
-        .collect();
+    let path_wide: Vec<u16> = OsStr::new(path).encode_wide().chain(Some(0)).collect();
 
     let mut free_bytes_available = ULARGE_INTEGER::default();
     let mut total_bytes = ULARGE_INTEGER::default();
@@ -94,7 +89,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let storage = Storage {
         path: PathBuf::from("/your/path/here"), // Change to your desired path
     };
-    
+
     match storage.get_free_space() {
         Ok(free_space) => println!("Free space at path: {} bytes", free_space),
         Err(e) => println!("Error: {}", e),

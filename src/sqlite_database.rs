@@ -1,11 +1,11 @@
-use std::error::Error;
-use uuid::Uuid;
-use r2d2::Pool;
-use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::params;
 use crate::{database::Database, entry::Entry};
 use async_trait::async_trait;
 use chrono::Utc;
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::params;
+use std::error::Error;
+use uuid::Uuid;
 
 pub struct SqliteDatabase {
     pool: Pool<SqliteConnectionManager>,
@@ -57,7 +57,7 @@ impl Database for SqliteDatabase {
     async fn get_entry(&self, uuid: Uuid) -> Result<Option<Entry>, Box<dyn Error>> {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare(
-            "SELECT uuid, file_name, file_size, source_ip, timestamp FROM entries WHERE uuid = ?"
+            "SELECT uuid, file_name, file_size, source_ip, timestamp FROM entries WHERE uuid = ?",
         )?;
 
         let entry = stmt.query_row(params![uuid.to_string()], |row| {

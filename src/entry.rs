@@ -10,7 +10,6 @@ pub struct Entry {
     pub timestamp: DateTime<Utc>,
 }
 
-
 /// Input for a new entry that will be sent to the server
 /// Other fields will be filled in by the server
 pub struct EntryInput {
