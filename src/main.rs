@@ -10,13 +10,14 @@ use uuid::Uuid;
 use std::path::PathBuf;
 use chrono::Utc;
 use futures_util::TryStreamExt;
-use tokio_util::io::{StreamReader, ReaderStream};
 use bytes::Bytes;
 use futures_util::StreamExt;
 use actix_multipart::Multipart;
 use std::io;
-use std::pin::Pin;
 use tokio::sync::mpsc;
+use actix_web::middleware::DefaultHeaders;
+use actix_files::NamedFile;
+use std::path::Path;
 
 mod database;
 mod entry;
@@ -47,19 +48,26 @@ async fn get_entry(
     }
 }
 
-// Delete an entry by UUID
-// This will be updated to also remove the file contents from Storage!
-// todo
+// Delete an entry by UUID and its associated file from storage
 #[delete("/entry/{uuid}")]
 async fn delete_entry(
     db: web::Data<Arc<Box<dyn Database>>>,
+    storage: web::Data<Arc<Box<dyn Storage>>>,
     path: web::Path<Uuid>,
 ) -> impl Responder {
     let uuid = path.into_inner();
-    match db.delete_entry(uuid).await {
-        Ok(true) => HttpResponse::Ok().body("Entry deleted"),
-        Ok(false) => HttpResponse::NotFound().body("Entry not found"),
-        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+    
+    // First try to delete from storage
+    match storage.delete_file(&uuid.to_string()).await {
+        Ok(_) => {
+            // If storage delete succeeds (or file didn't exist), delete from database
+            match db.delete_entry(uuid).await {
+                Ok(true) => HttpResponse::Ok().body("Entry and file deleted"),
+                Ok(false) => HttpResponse::NotFound().body("Entry not found"),
+                Err(e) => HttpResponse::InternalServerError().body(format!("Database error: {}", e)),
+            }
+        },
+        Err(e) => HttpResponse::InternalServerError().body(format!("Storage error: {}", e)),
     }
 }
 
@@ -194,10 +202,11 @@ async fn upload_file(
     }
 }
 
-
-
-
-
+#[get("/")]
+async fn index() -> actix_web::Result<NamedFile> {
+    let path = Path::new("src/web/test.html");
+    Ok(NamedFile::open(path)?)
+}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -223,8 +232,10 @@ async fn main() -> std::io::Result<()> {
     // Start HTTP server
     HttpServer::new(move || {
         App::new()
+            .wrap(DefaultHeaders::new().add(("X-Content-Type-Options", "nosniff")))
             .app_data(db_data.clone())
             .app_data(storage_data.clone())
+            .service(index)
             .service(list_entries)
             .service(get_entry)
             .service(delete_entry)
