@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+actix-multipart = "0.7.2"
 actix-web = "4.9.0"
 async-trait = "0.1.83"
 bytes = "1.8.0"
