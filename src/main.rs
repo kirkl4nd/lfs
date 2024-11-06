@@ -16,9 +16,6 @@ use futures_util::StreamExt;
 use actix_multipart::Multipart;
 use std::io;
 use tokio::sync::mpsc;
-use actix_web::middleware::DefaultHeaders;
-use actix_files::NamedFile;
-use std::path::Path;
 use actix_cors::Cors;
 
 mod database;
@@ -81,7 +78,7 @@ async fn delete_entry(
                 },
                 DeleteFileResult::Failure(e) => {
                     // Storage deletion failed - attempt to restore database entry
-                    if let Err(db_err) = db.create_entry(entry).await {
+                    if let Err(db_err) = db.insert_entry(entry).await {
                         return HttpResponse::InternalServerError()
                             .body(format!("Critical error: Storage deletion failed AND database restoration failed. Storage error: {}, Database error: {}", e, db_err));
                     }
@@ -217,7 +214,7 @@ async fn upload_file(
                     timestamp: Utc::now(),
                 };
 
-                match db.create_entry(entry).await {
+                match db.insert_entry(entry).await {
                     Ok(_) => HttpResponse::Ok().json(uuid),
                     Err(e) => {
                         // Clean up the stored file if database entry fails

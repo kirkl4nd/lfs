@@ -12,6 +12,6 @@ use uuid::Uuid;
 pub trait Database: Send + Sync {
     async fn list_uuids(&self) -> Result<Vec<Uuid>, Box<dyn Error>>;
     async fn get_entry(&self, uuid: Uuid) -> Result<Option<Entry>, Box<dyn Error>>;
-    async fn create_entry(&self, input: Entry) -> Result<Uuid, Box<dyn Error>>;
+    async fn insert_entry(&self, input: Entry) -> Result<Uuid, Box<dyn Error>>;
     async fn delete_entry(&self, uuid: Uuid) -> Result<bool, Box<dyn Error>>;
 }

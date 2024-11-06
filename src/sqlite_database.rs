@@ -79,14 +79,13 @@ impl Database for SqliteDatabase {
         }
     }
 
-    async fn create_entry(&self, input: Entry) -> Result<Uuid, Box<dyn Error>> {
+    async fn insert_entry(&self, input: Entry) -> Result<Uuid, Box<dyn Error>> {
         let conn = self.pool.get()?;
-        let new_uuid = Uuid::new_v4();
 
         conn.execute(
             "INSERT INTO entries (uuid, file_name, file_size, source_ip, timestamp) VALUES (?, ?, ?, ?, ?)",
             params![
-                new_uuid.to_string(),
+                input.uuid.to_string(),
                 input.file_name,
                 input.file_size,
                 input.source_ip,
@@ -94,7 +93,7 @@ impl Database for SqliteDatabase {
             ],
         )?;
 
-        Ok(new_uuid)
+        Ok(input.uuid)
     }
 
     async fn delete_entry(&self, uuid: Uuid) -> Result<bool, Box<dyn Error>> {
