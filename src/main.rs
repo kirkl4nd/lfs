@@ -4,6 +4,7 @@ use crate::storage::Storage;
 use crate::local_storage::LocalStorage;
 use actix_web::{web, App, HttpServer, Responder, HttpResponse, get, delete, post, HttpRequest};
 use entry::Entry;
+use storage::{DeleteFileResult, ReadFileResult, WriteFileResult};
 use std::env;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -59,23 +60,38 @@ async fn delete_entry(
     let uuid = path.into_inner();
     
     // First check if entry exists in database
-    match db.get_entry(uuid).await {
-        Ok(Some(_)) => {
-            // Delete from database first
-            match db.delete_entry(uuid).await {
-                Ok(true) => {
-                    // Try to delete from storage, but don't fail if storage deletion fails
-                    if let Err(e) = storage.delete_file(&uuid.to_string()).await {
-                        eprintln!("Failed to delete file from storage: {}", e);
-                    }
+    let entry = match db.get_entry(uuid).await {
+        Ok(Some(entry)) => entry,
+        Ok(None) => return HttpResponse::NotFound().body("Entry not found"),
+        Err(e) => return HttpResponse::InternalServerError()
+            .body(format!("Database error: {}", e)),
+    };
+
+    // Delete from database
+    match db.delete_entry(uuid).await {
+        Ok(true) => {
+            // Try to delete from storage
+            match storage.delete_file(&uuid.to_string()).await {
+                DeleteFileResult::Success => {
                     HttpResponse::Ok().body("Entry deleted")
                 },
-                Ok(false) => HttpResponse::NotFound().body("Entry not found"),
-                Err(e) => HttpResponse::InternalServerError()
-                    .body(format!("Database error: {}", e)),
+                DeleteFileResult::NotFound => {
+                    // File not found in storage but database entry was deleted - this is ok
+                    HttpResponse::Ok().body("Entry deleted")
+                },
+                DeleteFileResult::Failure(e) => {
+                    // Storage deletion failed - attempt to restore database entry
+                    if let Err(db_err) = db.create_entry(entry).await {
+                        return HttpResponse::InternalServerError()
+                            .body(format!("Critical error: Storage deletion failed AND database restoration failed. Storage error: {}, Database error: {}", e, db_err));
+                    }
+                    HttpResponse::InternalServerError()
+                        .body(format!("Storage error: {}", e))
+                }
             }
         },
-        Ok(None) => HttpResponse::NotFound().body("Entry not found"),
+        Ok(false) => HttpResponse::InternalServerError()
+            .body("Database entry not removed"),
         Err(e) => HttpResponse::InternalServerError()
             .body(format!("Database error: {}", e)),
     }
@@ -95,19 +111,20 @@ async fn download_file(
     match db.get_entry(uuid).await {
         Ok(Some(entry)) => {
             match storage.read_file(&uuid.to_string()).await {
-                Ok(stream) => {
+                ReadFileResult::Success(stream) => {
                     HttpResponse::Ok()
-                        .append_header(("Access-Control-Allow-Origin", "*"))
                         .append_header(("Content-Type", "application/octet-stream"))
                         .append_header(("Content-Disposition", format!("attachment; filename=\"{}\"", entry.file_name)))
                         .streaming(stream)
                 },
-                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                ReadFileResult::NotFound => {
                     HttpResponse::NotFound()
                         .body("File contents are missing from storage")
                 },
-                Err(e) => HttpResponse::InternalServerError()
-                    .body(format!("Storage error: {}", e)),
+                ReadFileResult::Failure(e) => {
+                    HttpResponse::InternalServerError()
+                        .body(format!("Storage error: {}", e))
+                }
             }
         },
         Ok(None) => HttpResponse::NotFound().body("Entry not found in database"),
@@ -168,7 +185,8 @@ async fn upload_file(
             match chunk {
                 Ok(data) => {
                     if tx.send(Ok(data)).await.is_err() {
-                        break;
+                        return HttpResponse::InternalServerError()
+                            .body("Failed to process upload stream");
                     }
                 }
                 Err(e) => {
@@ -177,7 +195,8 @@ async fn upload_file(
                         format!("Multipart error: {}", e)
                     );
                     let _ = tx.send(Err(io_error)).await;
-                    break;
+                    return HttpResponse::InternalServerError()
+                        .body(format!("Upload error: {}", e));
                 }
             }
         }
@@ -185,9 +204,9 @@ async fn upload_file(
         // Drop the sender to signal completion
         drop(tx);
 
-        // Wait for storage to complete
+        // Wait for storage to complete and handle the result
         match storage_handle.await {
-            Ok(Ok(())) => {
+            Ok(WriteFileResult::Success) => {
                 let entry = Entry {
                     uuid,
                     file_name: filename,
@@ -201,16 +220,24 @@ async fn upload_file(
                 match db.create_entry(entry).await {
                     Ok(_) => HttpResponse::Ok().json(uuid),
                     Err(e) => {
-                        let _ = storage.delete_file(&uuid.to_string()).await;
+                        // Clean up the stored file if database entry fails
+                        match storage.delete_file(&uuid.to_string()).await {
+                            DeleteFileResult::Success | DeleteFileResult::NotFound => (),
+                            DeleteFileResult::Failure(cleanup_err) => {
+                                eprintln!("Failed to clean up file after database error: {}", cleanup_err);
+                            }
+                        }
                         HttpResponse::InternalServerError()
                             .body(format!("Database error: {}", e))
                     }
                 }
             }
-            Ok(Err(e)) => HttpResponse::InternalServerError()
-                .body(format!("Storage error: {}", e)),
+            Ok(WriteFileResult::Failure(e)) => {
+                HttpResponse::InternalServerError()
+                    .body(format!("Storage error: {}", e))
+            }
             Err(e) => HttpResponse::InternalServerError()
-                .body(format!("Task error: {}", e)),
+                .body(format!("Task error: {}", e))
         }
     } else {
         HttpResponse::BadRequest().body("No file in request")

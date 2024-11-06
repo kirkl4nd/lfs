@@ -8,7 +8,7 @@ use std::io;
 use tokio::io::AsyncWriteExt;
 use tokio_stream::{Stream, StreamExt};
 
-use crate::storage::Storage;
+use crate::storage::{DeleteFileResult, ReadFileResult, Storage, WriteFileResult};
 
 pub struct LocalStorage {
     storage_path: PathBuf,
@@ -31,36 +31,58 @@ impl Storage for LocalStorage {
         &self,
         uuid: &str,
         mut data: Pin<Box<dyn Stream<Item = Result<Bytes, io::Error>> + Send>>,
-    ) -> io::Result<()> {
+    ) -> WriteFileResult {
         let file_path = self.file_path(uuid);
-        let mut file = File::create(&file_path).await?;
+        let file = match File::create(&file_path).await {
+            Ok(f) => f,
+            Err(e) => return WriteFileResult::Failure(e),
+        };
         
+        let mut file = file;
         while let Some(chunk) = data.next().await {
-            let chunk = chunk?;
-            file.write_all(&chunk).await?;
+            match chunk {
+                Ok(chunk) => {
+                    if let Err(e) = file.write_all(&chunk).await {
+                        return WriteFileResult::Failure(e);
+                    }
+                }
+                Err(e) => return WriteFileResult::Failure(e),
+            }
         }
         
-        Ok(())
+        WriteFileResult::Success
     }
 
     async fn read_file(
         &self,
         uuid: &str,
-    ) -> io::Result<Pin<Box<dyn Stream<Item = Result<Bytes, io::Error>> + Send>>> {
+    ) -> ReadFileResult {
         let file_path = self.file_path(uuid);
 
         if !file_path.exists() {
-            return Err(io::Error::new(io::ErrorKind::NotFound, "File not found"));
+            return ReadFileResult::NotFound;
         }
 
-        let file = File::open(&file_path).await?;
-        let stream = tokio_util::io::ReaderStream::new(file);
-        Ok(Box::pin(stream))
+        match File::open(&file_path).await {
+            Ok(file) => {
+                let stream = tokio_util::io::ReaderStream::new(file);
+                ReadFileResult::Success(Box::pin(stream))
+            }
+            Err(e) => ReadFileResult::Failure(e),
+        }
     }
 
-    async fn delete_file(&self, uuid: &str) -> io::Result<()> {
+    async fn delete_file(&self, uuid: &str) -> DeleteFileResult {
         let file_path = self.file_path(uuid);
-        tokio::fs::remove_file(file_path).await
+        
+        if !file_path.exists() {
+            return DeleteFileResult::NotFound;
+        }
+
+        match tokio::fs::remove_file(file_path).await {
+            Ok(_) => DeleteFileResult::Success,
+            Err(e) => DeleteFileResult::Failure(e),
+        }
     }
 }
 
@@ -75,22 +97,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_local_storage_operations() {
-        // Create storage instance
         let storage = LocalStorage::new(PathBuf::from(TEST_DIR));
         let file_path = storage.file_path(TEST_UUID);
 
-        // Create test data (1KB of zeros)
         let data = vec![0u8; 1024];
         let chunks = vec![Ok(Bytes::from(data.clone()))];
         let stream = tokio_stream::iter(chunks);
         let boxed_stream = Box::pin(stream);
 
         // Test write_file
-        storage.write_file(TEST_UUID, boxed_stream).await.unwrap();
+        match storage.write_file(TEST_UUID, boxed_stream).await {
+            WriteFileResult::Success => (),
+            _ => panic!("Failed to write file"),
+        }
         assert!(file_path.exists(), "File should exist after writing");
 
         // Test read_file
-        let mut read_stream = storage.read_file(TEST_UUID).await.unwrap();
+        let read_stream = match storage.read_file(TEST_UUID).await {
+            ReadFileResult::Success(stream) => stream,
+            _ => panic!("Failed to read file"),
+        };
+        let mut read_stream = read_stream;
         let mut read_data = Vec::new();
         while let Some(chunk) = read_stream.next().await {
             read_data.extend_from_slice(&chunk.unwrap());
@@ -98,7 +125,10 @@ mod tests {
         assert_eq!(read_data, data, "Read data should match written data");
 
         // Test delete_file
-        storage.delete_file(TEST_UUID).await.unwrap();
+        match storage.delete_file(TEST_UUID).await {
+            DeleteFileResult::Success => (),
+            _ => panic!("Failed to delete file"),
+        }
         assert!(!file_path.exists(), "File should not exist after deletion");
 
         // Clean up test directory

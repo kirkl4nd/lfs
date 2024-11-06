@@ -4,18 +4,35 @@ use bytes::Bytes;
 use std::pin::Pin;
 use std::io;
 
+pub enum WriteFileResult {
+    Success,
+    Failure(io::Error),
+}
+
+pub enum ReadFileResult {
+    Success(Pin<Box<dyn Stream<Item = Result<Bytes, io::Error>> + Send>>),
+    NotFound,
+    Failure(io::Error),
+}
+
+pub enum DeleteFileResult {
+    Success,
+    NotFound,
+    Failure(io::Error),
+}
+
 #[async_trait]
 pub trait Storage: Send + Sync {
     async fn write_file(
         &self,
         uuid: &str,
         data: Pin<Box<dyn Stream<Item = Result<Bytes, io::Error>> + Send>>,
-    ) -> io::Result<()>;
+    ) -> WriteFileResult;
 
     async fn read_file(
         &self,
         uuid: &str,
-    ) -> io::Result<Pin<Box<dyn Stream<Item = Result<Bytes, io::Error>> + Send>>>;
+    ) -> ReadFileResult;
 
-    async fn delete_file(&self, uuid: &str) -> io::Result<()>;
+    async fn delete_file(&self, uuid: &str) -> DeleteFileResult;
 }
