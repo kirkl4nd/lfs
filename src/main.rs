@@ -4,7 +4,7 @@ use crate::storage::Storage;
 use crate::local_storage::LocalStorage;
 use actix_web::{web, App, HttpServer, Responder, HttpResponse, get, delete, post, HttpRequest};
 use entry::Entry;
-use storage::{DeleteFileResult, ReadFileResult, WriteFileResult};
+use storage::{DeleteFileResult, WriteFileResult};
 use std::env;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -17,6 +17,8 @@ use actix_multipart::Multipart;
 use std::io;
 use tokio::sync::mpsc;
 use actix_cors::Cors;
+use actix_files::NamedFile;
+use actix_web::http::header::{ContentDisposition, DispositionType, DispositionParam};
 
 mod database;
 mod entry;
@@ -102,31 +104,26 @@ async fn download_file(
     db: web::Data<Arc<Box<dyn Database>>>,
     storage: web::Data<Arc<Box<dyn Storage>>>,
     path: web::Path<Uuid>,
-) -> impl Responder {
+) -> Result<NamedFile, actix_web::Error> {
     let uuid = path.into_inner();
     
     match db.get_entry(uuid).await {
         Ok(Some(entry)) => {
-            match storage.read_file(&uuid.to_string()).await {
-                ReadFileResult::Success(stream) => {
-                    HttpResponse::Ok()
-                        .append_header(("Content-Type", "application/octet-stream"))
-                        .append_header(("Content-Disposition", format!("attachment; filename=\"{}\"", entry.file_name)))
-                        .streaming(stream)
-                },
-                ReadFileResult::NotFound => {
-                    HttpResponse::NotFound()
-                        .body("File contents are missing from storage")
-                },
-                ReadFileResult::Failure(e) => {
-                    HttpResponse::InternalServerError()
-                        .body(format!("Storage error: {}", e))
-                }
+            let file_path = storage.get_file_path(&uuid.to_string());
+            
+            if !file_path.exists() {
+                return Err(actix_web::error::ErrorNotFound("File not found"));
             }
+
+            Ok(NamedFile::open(file_path)?
+                .set_content_disposition(ContentDisposition {
+                    disposition: DispositionType::Attachment,
+                    parameters: vec![DispositionParam::Filename(entry.file_name)],
+                })
+                .use_last_modified(true))
         },
-        Ok(None) => HttpResponse::NotFound().body("Entry not found in database"),
-        Err(e) => HttpResponse::InternalServerError()
-            .body(format!("Database error: {}", e)),
+        Ok(None) => Err(actix_web::error::ErrorNotFound("Entry not found")),
+        Err(e) => Err(actix_web::error::ErrorInternalServerError(e)),
     }
 }
 

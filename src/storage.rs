@@ -3,15 +3,10 @@ use tokio_stream::Stream;
 use bytes::Bytes;
 use std::pin::Pin;
 use std::io;
+use std::path::PathBuf;
 
 pub enum WriteFileResult {
     Success,
-    Failure(io::Error),
-}
-
-pub enum ReadFileResult {
-    Success(Pin<Box<dyn Stream<Item = Result<Bytes, io::Error>> + Send>>),
-    NotFound,
     Failure(io::Error),
 }
 
@@ -29,10 +24,7 @@ pub trait Storage: Send + Sync {
         data: Pin<Box<dyn Stream<Item = Result<Bytes, io::Error>> + Send>>,
     ) -> WriteFileResult;
 
-    async fn read_file(
-        &self,
-        uuid: &str,
-    ) -> ReadFileResult;
-
+    fn get_file_path(&self, uuid: &str) -> PathBuf;
+    
     async fn delete_file(&self, uuid: &str) -> DeleteFileResult;
 }
