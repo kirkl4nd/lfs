@@ -18,6 +18,7 @@ use tokio::sync::mpsc;
 use actix_web::middleware::DefaultHeaders;
 use actix_files::NamedFile;
 use std::path::Path;
+use actix_cors::Cors;
 
 mod database;
 mod entry;
@@ -57,17 +58,26 @@ async fn delete_entry(
 ) -> impl Responder {
     let uuid = path.into_inner();
     
-    // First try to delete from storage
-    match storage.delete_file(&uuid.to_string()).await {
-        Ok(_) => {
-            // If storage delete succeeds (or file didn't exist), delete from database
+    // First check if entry exists in database
+    match db.get_entry(uuid).await {
+        Ok(Some(_)) => {
+            // Delete from database first
             match db.delete_entry(uuid).await {
-                Ok(true) => HttpResponse::Ok().body("Entry and file deleted"),
+                Ok(true) => {
+                    // Try to delete from storage, but don't fail if storage deletion fails
+                    if let Err(e) = storage.delete_file(&uuid.to_string()).await {
+                        eprintln!("Failed to delete file from storage: {}", e);
+                    }
+                    HttpResponse::Ok().body("Entry deleted")
+                },
                 Ok(false) => HttpResponse::NotFound().body("Entry not found"),
-                Err(e) => HttpResponse::InternalServerError().body(format!("Database error: {}", e)),
+                Err(e) => HttpResponse::InternalServerError()
+                    .body(format!("Database error: {}", e)),
             }
         },
-        Err(e) => HttpResponse::InternalServerError().body(format!("Storage error: {}", e)),
+        Ok(None) => HttpResponse::NotFound().body("Entry not found"),
+        Err(e) => HttpResponse::InternalServerError()
+            .body(format!("Database error: {}", e)),
     }
 }
 
@@ -82,22 +92,27 @@ async fn download_file(
 ) -> impl Responder {
     let uuid = path.into_inner();
     
-    // First try to get the entry from database
     match db.get_entry(uuid).await {
         Ok(Some(entry)) => {
-            // Entry exists, now try to get the file from storage
             match storage.read_file(&uuid.to_string()).await {
                 Ok(stream) => {
-                    // Return the file stream with proper headers
                     HttpResponse::Ok()
+                        .append_header(("Access-Control-Allow-Origin", "*"))
+                        .append_header(("Content-Type", "application/octet-stream"))
                         .append_header(("Content-Disposition", format!("attachment; filename=\"{}\"", entry.file_name)))
                         .streaming(stream)
                 },
-                Err(e) => HttpResponse::InternalServerError().body(format!("Storage error: {}", e)),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                    HttpResponse::NotFound()
+                        .body("File contents are missing from storage")
+                },
+                Err(e) => HttpResponse::InternalServerError()
+                    .body(format!("Storage error: {}", e)),
             }
         },
-        Ok(None) => HttpResponse::NotFound().body("File not found"),
-        Err(e) => HttpResponse::InternalServerError().body(format!("Database error: {}", e)),
+        Ok(None) => HttpResponse::NotFound().body("Entry not found in database"),
+        Err(e) => HttpResponse::InternalServerError()
+            .body(format!("Database error: {}", e)),
     }
 }
 
@@ -203,9 +218,10 @@ async fn upload_file(
 }
 
 #[get("/")]
-async fn index() -> actix_web::Result<NamedFile> {
-    let path = Path::new("src/web/test.html");
-    Ok(NamedFile::open(path)?)
+async fn index() -> impl Responder {
+    HttpResponse::Ok()
+        .content_type("text/html")
+        .body(include_str!("web/test.html"))
 }
 
 #[actix_web::main]
@@ -232,7 +248,11 @@ async fn main() -> std::io::Result<()> {
     // Start HTTP server
     HttpServer::new(move || {
         App::new()
-            .wrap(DefaultHeaders::new().add(("X-Content-Type-Options", "nosniff")))
+            .wrap(Cors::default()
+                .allow_any_origin()
+                .allow_any_method()
+                .allow_any_header()
+                .max_age(3600))
             .app_data(db_data.clone())
             .app_data(storage_data.clone())
             .service(index)
