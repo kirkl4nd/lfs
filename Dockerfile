@@ -14,7 +14,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy the binary from builder
-COPY --from=builder /usr/src/app/target/release/backend /app/backend
+COPY --from=builder /usr/src/app/target/release/lfs /app/lfs
 
 # Create directories for volumes
 RUN mkdir -p /app/data/storage /app/data/db
@@ -27,4 +27,4 @@ ENV DATABASE_PATH=/app/data/db/database.db
 
 EXPOSE 8080
 
-CMD ["./backend"]
+CMD ["./lfs"]
