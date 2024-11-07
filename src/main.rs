@@ -19,7 +19,6 @@ use tokio::sync::mpsc;
 use actix_cors::Cors;
 use actix_files::NamedFile;
 use actix_web::http::header::{ContentDisposition, DispositionType, DispositionParam};
-use std::collections::HashSet;
 
 mod database;
 mod entry;

@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 use tokio_stream::Stream;
 use bytes::Bytes;
-use uuid::Uuid;
 use std::error::Error;
 use std::pin::Pin;
 use std::io;
