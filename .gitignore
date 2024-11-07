@@ -1,7 +1,40 @@
-/target
+# Rust build artifacts
+/target/
+**/*.rs.bk
+Cargo.lock
 
-test.db
+# Database files
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
 
-/storage
+# Storage directories
+/storage/
+/test-storage/
 
-/test-storage
+# Environment files
+.env
+.env.*
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Debug files
+*.pdb
+
+# Backup files
+*.bak
+*~
+
+# Docker volumes and data
+data/
+volumes/
+
+# Logs
+*.log
+logs/
