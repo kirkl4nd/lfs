@@ -239,7 +239,7 @@ async fn upload_file(
 async fn index() -> impl Responder {
     HttpResponse::Ok()
         .content_type("text/html")
-        .body(include_str!("web/test.html"))
+        .body(include_str!("web/client.html"))
 }
 
 
