@@ -346,32 +346,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 
 [[package]]
-name = "backend"
-version = "0.1.0"
-dependencies = [
- "actix-cors",
- "actix-files",
- "actix-multipart",
- "actix-web",
- "async-trait",
- "bytes",
- "chrono",
- "dotenv",
- "futures-util",
- "libc",
- "r2d2",
- "r2d2_sqlite",
- "rusqlite",
- "serde",
- "serde_json",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "uuid",
- "winapi",
-]
-
-[[package]]
 name = "backtrace"
 version = "0.3.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -911,6 +885,32 @@ name = "language-tags"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4345964bb142484797b161f473a503a434de77149dd8c7427788c6e13379388"
+
+[[package]]
+name = "lfs"
+version = "0.1.0"
+dependencies = [
+ "actix-cors",
+ "actix-files",
+ "actix-multipart",
+ "actix-web",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "dotenv",
+ "futures-util",
+ "libc",
+ "r2d2",
+ "r2d2_sqlite",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "uuid",
+ "winapi",
+]
 
 [[package]]
 name = "libc"
