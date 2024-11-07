@@ -541,7 +541,7 @@
 
         async function loadFiles() {
             try {
-                const response = await fetch('http://localhost:8080/entries');
+                const response = await fetch('/entries');
                 const uuids = await response.json();
                 const fileList = document.getElementById('fileList');
 
@@ -561,7 +561,7 @@
                 // Get details for each UUID
                 const fileDetails = await Promise.all(
                     uuids.map(uuid => 
-                        fetch(`http://localhost:8080/entry/${uuid}`).then(r => r.json())
+                        fetch(`/entry/${uuid}`).then(r => r.json())
                     )
                 );
 
@@ -725,7 +725,7 @@
             const formData = new FormData();
             formData.append('file', file);
 
-            xhr.open('POST', 'http://localhost:8080/upload', true);
+            xhr.open('POST', '/upload', true);
             xhr.send(formData);
         }
 
@@ -827,7 +827,7 @@
             button.disabled = true;
             
             try {
-                const response = await fetch(`http://localhost:8080/entry/${uuid}`, {
+                const response = await fetch(`/entry/${uuid}`, {
                     method: 'DELETE'
                 });
 
@@ -864,7 +864,7 @@
         function downloadFile(uuid, filename) {
             resetDeleteConfirmation();
             // Direct browser to download URL
-            window.location.href = `http://localhost:8080/contents/${uuid}`;
+            window.location.href = `/contents/${uuid}`;
         }
 
         function startUpload() {
