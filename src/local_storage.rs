@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use bytes::Bytes;
 use tokio::fs::File;
-use std::fs;
+use std::{error::Error, fs};
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::io;
@@ -64,6 +64,25 @@ impl Storage for LocalStorage {
             Ok(_) => DeleteFileResult::Success,
             Err(e) => DeleteFileResult::Failure(e),
         }
+    }
+
+    async fn list_files(&self) -> Result<Vec<String>, Box<dyn Error>> {
+        let mut files = Vec::new();
+        let entries = fs::read_dir(&self.storage_path)?;
+
+        for entry in entries {
+            if let Ok(entry) = entry {
+                if let Ok(file_type) = entry.file_type() {
+                    if file_type.is_file() {
+                        if let Some(file_name) = entry.file_name().to_str() {
+                            files.push(file_name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(files)
     }
 }
 

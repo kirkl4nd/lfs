@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  lfs:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - lfs_data:/app/data
+    environment:
+      - STORAGE_TYPE=local
+      - STORAGE_PATH=/app/data/storage
+      - DATABASE_TYPE=sqlite
+      - DATABASE_PATH=/app/data/db/database.db
+
+volumes:
+  lfs_data:

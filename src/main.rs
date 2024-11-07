@@ -19,6 +19,7 @@ use tokio::sync::mpsc;
 use actix_cors::Cors;
 use actix_files::NamedFile;
 use actix_web::http::header::{ContentDisposition, DispositionType, DispositionParam};
+use std::collections::HashSet;
 
 mod database;
 mod entry;
@@ -140,6 +141,7 @@ async fn upload_file(
     db: web::Data<Arc<Box<dyn Database>>>,
 ) -> impl Responder {
     let uuid = Uuid::new_v4();
+    let uuid_str = uuid.to_string();
     
     if let Ok(Some(mut field)) = payload.try_next().await {
         let filename = match field
@@ -158,20 +160,15 @@ async fn upload_file(
             None => return HttpResponse::BadRequest().body("Content-Length header required"),
         };
 
-        // Create a channel for streaming the file data
         let (tx, rx) = mpsc::channel::<Result<Bytes, io::Error>>(1024);
-        
-        // Create a stream from the receiver
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
         let pinned_stream = Box::pin(stream);
 
-        // Use the Arc instead of cloning storage
         let storage_clone = Arc::clone(&storage);
-        let uuid_string = uuid.to_string();
+        let uuid_for_storage = uuid_str.clone();
         
-        // Spawn a task to handle the storage write
         let storage_handle = tokio::spawn(async move {
-            storage_clone.write_file(&uuid_string, pinned_stream).await
+            storage_clone.write_file(&uuid_for_storage, pinned_stream).await
         });
 
         // Process the field in the current task
@@ -179,6 +176,7 @@ async fn upload_file(
             match chunk {
                 Ok(data) => {
                     if tx.send(Ok(data)).await.is_err() {
+                        let _ = storage.delete_file(&uuid_str).await;
                         return HttpResponse::InternalServerError()
                             .body("Failed to process upload stream");
                     }
@@ -189,16 +187,15 @@ async fn upload_file(
                         format!("Multipart error: {}", e)
                     );
                     let _ = tx.send(Err(io_error)).await;
+                    let _ = storage.delete_file(&uuid_str).await;
                     return HttpResponse::InternalServerError()
                         .body(format!("Upload error: {}", e));
                 }
             }
         }
         
-        // Drop the sender to signal completion
         drop(tx);
 
-        // Wait for storage to complete and handle the result
         match storage_handle.await {
             Ok(WriteFileResult::Success) => {
                 let entry = Entry {
@@ -215,23 +212,24 @@ async fn upload_file(
                     Ok(_) => HttpResponse::Ok().json(uuid),
                     Err(e) => {
                         // Clean up the stored file if database entry fails
-                        match storage.delete_file(&uuid.to_string()).await {
-                            DeleteFileResult::Success | DeleteFileResult::NotFound => (),
-                            DeleteFileResult::Failure(cleanup_err) => {
-                                eprintln!("Failed to clean up file after database error: {}", cleanup_err);
-                            }
-                        }
+                        let _ = storage.delete_file(&uuid_str).await;
                         HttpResponse::InternalServerError()
                             .body(format!("Database error: {}", e))
                     }
                 }
             }
             Ok(WriteFileResult::Failure(e)) => {
+                // Clean up any partial file if storage write fails
+                let _ = storage.delete_file(&uuid_str).await;
                 HttpResponse::InternalServerError()
                     .body(format!("Storage error: {}", e))
             }
-            Err(e) => HttpResponse::InternalServerError()
-                .body(format!("Task error: {}", e))
+            Err(e) => {
+                // Clean up any partial file if task fails
+                let _ = storage.delete_file(&uuid_str).await;
+                HttpResponse::InternalServerError()
+                    .body(format!("Task error: {}", e))
+            }
         }
     } else {
         HttpResponse::BadRequest().body("No file in request")
@@ -245,25 +243,73 @@ async fn index() -> impl Responder {
         .body(include_str!("web/test.html"))
 }
 
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     // Load environment variables
     dotenv::dotenv().ok();
 
-    // Initialize database
-    let database_path = env::var("DATABASE_PATH").expect("DATABASE_PATH must be set");
-    let db: Arc<Box<dyn Database>> = Arc::new(Box::new(
-        SqliteDatabase::new(&database_path)
-            .await
-            .expect("Failed to initialize database"),
-    ));
+    // Initialize database based on DATABASE_TYPE
+    let database_type = env::var("DATABASE_TYPE").unwrap_or_else(|_| {
+        eprintln!("Error: DATABASE_TYPE must be set in .env file");
+        eprintln!("Supported values:");
+        eprintln!("  - sqlite (requires DATABASE_PATH)");
+        std::process::exit(1);
+    });
+
+    let db: Arc<Box<dyn Database>> = match database_type.as_str() {
+        "sqlite" => {
+            let database_path = env::var("DATABASE_PATH").unwrap_or_else(|_| {
+                eprintln!("Error: DATABASE_PATH must be set in .env file when using sqlite database");
+                eprintln!("Example .env configuration:");
+                eprintln!("DATABASE_TYPE=sqlite");
+                eprintln!("DATABASE_PATH=/path/to/database.db");
+                std::process::exit(1);
+            });
+
+            Arc::new(Box::new(
+                SqliteDatabase::new(&database_path).await.unwrap_or_else(|e| {
+                    eprintln!("Failed to initialize sqlite database: {}", e);
+                    std::process::exit(1);
+                }),
+            ))
+        }
+        _ => {
+            eprintln!("Error: Unsupported DATABASE_TYPE '{}'", database_type);
+            eprintln!("Supported values:");
+            eprintln!("  - sqlite (requires DATABASE_PATH)");
+            std::process::exit(1);
+        }
+    };
     let db_data = web::Data::new(db);
 
-    // Initialize storage
-    let storage_path = env::var("STORAGE_PATH").expect("STORAGE_PATH must be set");
-    let storage: Arc<Box<dyn Storage>> = Arc::new(Box::new(
-        LocalStorage::new(PathBuf::from(storage_path))
-    ));
+    // Initialize storage based on STORAGE_TYPE
+    let storage_type = env::var("STORAGE_TYPE").unwrap_or_else(|_| {
+        eprintln!("Error: STORAGE_TYPE must be set in .env file");
+        eprintln!("Supported values:");
+        eprintln!("  - local (requires STORAGE_PATH)");
+        std::process::exit(1);
+    });
+
+    let storage: Arc<Box<dyn Storage>> = match storage_type.as_str() {
+        "local" => {
+            let storage_path = env::var("STORAGE_PATH").unwrap_or_else(|_| {
+                eprintln!("Error: STORAGE_PATH must be set in .env file when using local storage");
+                eprintln!("Example .env configuration:");
+                eprintln!("STORAGE_TYPE=local");
+                eprintln!("STORAGE_PATH=/path/to/storage");
+                std::process::exit(1);
+            });
+
+            Arc::new(Box::new(LocalStorage::new(PathBuf::from(storage_path))))
+        }
+        _ => {
+            eprintln!("Error: Unsupported STORAGE_TYPE '{}'", storage_type);
+            eprintln!("Supported values:");
+            eprintln!("  - local (requires STORAGE_PATH)");
+            std::process::exit(1);
+        }
+    };
     let storage_data = web::Data::new(storage);
 
     // Start HTTP server
@@ -283,7 +329,7 @@ async fn main() -> std::io::Result<()> {
             .service(download_file)
             .service(upload_file)
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind(("0.0.0.0", 8080))?
     .run()
     .await
 }

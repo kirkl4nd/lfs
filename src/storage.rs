@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 use tokio_stream::Stream;
 use bytes::Bytes;
+use uuid::Uuid;
+use std::error::Error;
 use std::pin::Pin;
 use std::io;
 use std::path::PathBuf;
@@ -27,4 +29,7 @@ pub trait Storage: Send + Sync {
     fn get_file_path(&self, uuid: &str) -> PathBuf;
     
     async fn delete_file(&self, uuid: &str) -> DeleteFileResult;
+
+    /// Returns a list of all files in storage by their filename
+    async fn list_files(&self) -> Result<Vec<String>, Box<dyn Error>>;
 }
