@@ -1,21 +1,26 @@
 # Build stage
-FROM rust:1.82-alpine as builder
+FROM rust:1.82-bullseye as builder
 
-# Install minimal build dependencies
-RUN apk add --no-cache musl-dev
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libsqlite3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create a new empty shell project
 WORKDIR /usr/src/lfs
 COPY . .
-
-# Build for release
 RUN cargo build --release
 
 # Final stage
-FROM alpine:3.19
+FROM debian:bookworm-slim
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libsqlite3-0 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 
 # Create app directories and set ownership
 WORKDIR /app
