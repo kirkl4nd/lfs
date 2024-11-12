@@ -484,6 +484,20 @@
             opacity: 0;
             pointer-events: none;
         }
+
+        /* Add after the last CSS rule */
+        body.drag-over::after {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(100, 108, 255, 0.1);
+            border: 2px dashed var(--primary-color);
+            pointer-events: none;
+            z-index: 9999;
+        }
     </style>
 </head>
 <body>
@@ -896,6 +910,40 @@
             // If click is not on a delete button or its children, reset confirmation
             if (!e.target.closest('.delete-btn')) {
                 resetDeleteConfirmation();
+            }
+        });
+
+        // Global drag and drop handlers
+        document.addEventListener('dragenter', (e) => {
+            preventDefaults(e);
+            if (!document.body.classList.contains('drag-over')) {
+                document.body.classList.add('drag-over');
+            }
+        });
+
+        document.addEventListener('dragover', (e) => {
+            preventDefaults(e);
+            if (!document.body.classList.contains('drag-over')) {
+                document.body.classList.add('drag-over');
+            }
+        });
+
+        document.addEventListener('dragleave', (e) => {
+            preventDefaults(e);
+            // Only remove the class if we're leaving the document body
+            if (e.target === document.body || e.target === document.documentElement) {
+                document.body.classList.remove('drag-over');
+            }
+        });
+
+        document.addEventListener('drop', (e) => {
+            preventDefaults(e);
+            document.body.classList.remove('drag-over');
+            
+            const file = e.dataTransfer.files[0];
+            if (file) {
+                showUploadModal();
+                handleFile(file);
             }
         });
     </script>
